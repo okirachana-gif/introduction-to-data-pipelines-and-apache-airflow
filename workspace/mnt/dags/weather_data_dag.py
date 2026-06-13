@@ -4,44 +4,59 @@ from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import PythonOperator
 
 
-def _get_dog_image_url():
-    print("Hello!")
+def _get_air_quality_data(**context):
+    print(context)
+
+    ds = context["ds"]
 
     import requests
 
-    # url = "https://dog.ceo/api/breeds/image/random"
-    # url = "https://raw.githubusercontent.com/zkan/data-engineering-bootcamp/refs/heads/main/dataset/greenery/addresses.csv"
-    # response = requests.get(url)
-    # print(response)
-    # data = response.json()
-    # print(data)
-
-    import csv
-    from io import StringIO
-
-    url = "https://raw.githubusercontent.com/zkan/data-engineering-bootcamp/refs/heads/main/dataset/greenery/addresses.csv"
-
+    #url = "https://dog.ceo/api/breeds/image/random"
+    url = f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude=13.8732348&longitude=100.5513485&hourly=pm2_5&start_date={ds}&end_date={ds}#"
     response = requests.get(url)
-    response.raise_for_status()
+    print(response)
+    data = response.json()
+    print(data)
 
-    csv_file = StringIO(response.text)
+    import json
 
-    reader = csv.DictReader(csv_file)
+    with open(f"/opt/airflow/dags/{ds}-output.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    rows = list(reader)
+def _find_average_pm25(**context):
+    ds = context["ds"]
+    
+    import json
 
-    print(rows[:3])
+    with open(f"/opt/airflow/dags/{ds}-output.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
 
+    pm25_values = data["hourly"]["pm2_5"]
+    average_pm25 = sum(pm25_values) / len(pm25_values)
+    print(f"Average PM2.5 for {ds}: {average_pm25}")
+
+    with open(f"/opt/airflow/dags/{ds}-average.json", "w", encoding="utf-8") as f:
+        data = {
+            "average_pm25": average_pm25
+        }
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 with DAG(
     "weather_data_dag",
     start_date=timezone.datetime(2026, 6, 6),
-    schedule="50 15 30 * *"
+    schedule="0 0  * * *" # หรือพิมพ์ "@daily"
 ):
-    get_dog_image_url = PythonOperator(
-        task_id="get_dog_image_url",
-        python_callable=_get_dog_image_url,
+    get_air_quality_data = PythonOperator(
+        task_id="get_air_quality_data",
+        python_callable=_get_air_quality_data,
     )
+
+    find_average_pm25 = PythonOperator(
+        task_id="find_average_pm25",
+        python_callable=_find_average_pm25,
+    )
+
+    get_air_quality_data >> find_average_pm25
 
     echo_date = BashOperator(
         task_id="echo_date",
